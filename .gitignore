@@ -11,3 +11,6 @@ desktop.ini
 
 # Optional: Large test artifacts (uncomment if you do not want to track test exports)
 # *.pdf
+
+push_to_github.bat
+

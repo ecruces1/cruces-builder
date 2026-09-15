@@ -2,9 +2,9 @@
   "name": "cruces-builder",
   "version": "1.0.0",
   "description": "Interactive Resume Builder web app for crucesdesign",
-  "main": "index.html",
+  "main": "server.js",
   "scripts": {
-    "start": "npx serve .",
+    "start": "node server.js",
     "build": "echo 'Static site ready for deployment'"
   },
   "keywords": [
