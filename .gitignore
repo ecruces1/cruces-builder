@@ -30,7 +30,9 @@ templates/*.ai
 # Scripts & Local Tools
 push_to_github.bat
 
-# Optional: Large test artifacts
-# *.pdf
+# Test & Development Media / Samples
+reference-images/
+samples/
+*.pdf
 
 

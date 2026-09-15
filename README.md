@@ -91,8 +91,6 @@ Then visit `http://localhost:8000` (or the port specified) in your browser.
 ├── template_data.js      # Default starter template structure and sample resume content
 ├── package.json          # Web app metadata & scripts for hosting / deployment
 ├── templates/            # Adobe Illustrator (.ai) vector templates & reference layouts
-├── samples/              # Sample input resumes & test export outputs (samples/exports/)
-├── reference-images/     # UI snapshots, verification captures, and dev reference images
 └── README.md             # Project documentation
 ```
 
