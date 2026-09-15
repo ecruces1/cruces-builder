@@ -89,6 +89,7 @@ Then visit `http://localhost:8000` (or the port specified) in your browser.
 ├── styles.css            # Stylesheets for editor UI, theme palettes, and print sheets
 ├── app.js                # Core state management, PDF parsing, history, and rendering logic
 ├── template_data.js      # Default starter template structure and sample resume content
+├── server.js             # Lightweight Node.js server for local testing & hosting
 ├── package.json          # Web app metadata & scripts for hosting / deployment
 └── README.md             # Project documentation
 ```
