@@ -1,0 +1,17 @@
+{
+  "name": "cruces-builder",
+  "version": "1.0.0",
+  "description": "Interactive Resume Builder web app for crucesdesign",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve .",
+    "build": "echo 'Static site ready for deployment'"
+  },
+  "keywords": [
+    "resume-builder",
+    "portfolio",
+    "crucesdesign"
+  ],
+  "author": "ecruces1",
+  "license": "ISC"
+}
