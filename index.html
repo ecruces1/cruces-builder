@@ -86,6 +86,11 @@
         ATS Text
       </button>
 
+      <button class="btn btn-secondary" id="btn-diagnostics" title="System diagnostics, issue reproduction, and stress tests">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+        Diagnostics
+      </button>
+
       <button class="btn btn-primary" id="btn-export-pdf">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
         Export PDF
@@ -563,6 +568,116 @@
     </div>
   </div>
 
+  <!-- Diagnostics & Bug Reporting Modal -->
+  <div class="modal-overlay" id="modal-diagnostics">
+    <div class="modal-card modal-lg" style="max-width: 780px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#0b7a75" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          <h3 class="modal-title">System Diagnostics & Issue Reproduction</h3>
+        </div>
+        <button class="btn btn-sm btn-outline" onclick="closeModal('modal-diagnostics')">✕</button>
+      </div>
+
+      <div class="modal-body" style="padding: 20px; display: flex; flex-direction: column; gap: 16px; max-height: 70vh; overflow-y: auto;">
+        
+        <!-- Live Environment & Telemetry Badges -->
+        <div class="diag-section">
+          <div class="diag-section-title">Client Environment & DOM Telemetry</div>
+          <div class="diag-metrics-grid">
+            <div class="diag-metric-card">
+              <span class="diag-metric-label">Web Fonts Status</span>
+              <span class="diag-metric-value" id="diag-font-status">Checking...</span>
+            </div>
+            <div class="diag-metric-card">
+              <span class="diag-metric-label">Device Pixel Ratio</span>
+              <span class="diag-metric-value" id="diag-dpr">-</span>
+            </div>
+            <div class="diag-metric-card">
+              <span class="diag-metric-label">Viewport / Screen</span>
+              <span class="diag-metric-value" id="diag-viewport">-</span>
+            </div>
+            <div class="diag-metric-card">
+              <span class="diag-metric-label">Canvas Pages</span>
+              <span class="diag-metric-value" id="diag-pages">-</span>
+            </div>
+            <div class="diag-metric-card">
+              <span class="diag-metric-label">Trapped Errors</span>
+              <span class="diag-metric-value" id="diag-error-count">0</span>
+            </div>
+            <div class="diag-metric-card">
+              <span class="diag-metric-label">LocalStorage History</span>
+              <span class="diag-metric-value" id="diag-storage-count">-</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 1-Click Diagnostics Export for Users -->
+        <div class="diag-section">
+          <div class="diag-section-title">User Issue Diagnosis Bundle</div>
+          <p style="font-size: 0.82rem; color: #64748b; margin: 4px 0 12px 0;">
+            Export this diagnostic bundle when encountering layout or parsing issues. It captures your exact resume state, browser metrics, and recent error logs for 1-to-1 reproduction.
+          </p>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <button class="btn btn-secondary" id="btn-copy-diag-bundle">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy Diagnostic Bundle (Clipboard)
+            </button>
+            <button class="btn btn-secondary" id="btn-download-diag-bundle">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Download Diagnostic JSON
+            </button>
+          </div>
+        </div>
+
+        <!-- Developer 1:1 Bug Replicator (Import Diagnostic Bundle) -->
+        <div class="diag-section">
+          <div class="diag-section-title">Developer Reproduction: Load Customer Diagnostic State</div>
+          <p style="font-size: 0.82rem; color: #64748b; margin: 4px 0 8px 0;">
+            Paste a customer's diagnostic JSON bundle below to instantly restore their exact document state and isolate the glitch.
+          </p>
+          <textarea id="diag-import-input" class="form-control" rows="3" placeholder='Paste {"timestamp": "...", "resumeState": {...}} bundle here...' style="font-family: monospace; font-size: 0.78rem; resize: vertical;"></textarea>
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px;">
+            <button class="btn btn-outline btn-sm" id="btn-load-diag-bundle">Restore & Inspect State</button>
+          </div>
+        </div>
+
+        <!-- Proactive Synthetic Stress Testing Suite -->
+        <div class="diag-section">
+          <div class="diag-section-title">Proactive Stress Test Cases</div>
+          <p style="font-size: 0.82rem; color: #64748b; margin: 4px 0 10px 0;">
+            Load adversarial synthetic payloads to test how the layout handles extreme strings, threshold splits, missing fields, or deep overflows.
+          </p>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <select id="select-stress-test" class="form-control" style="font-size: 0.84rem; flex: 1; min-width: 260px;">
+              <option value="extreme_lengths">Extreme Text & Long URLs</option>
+              <option value="boundary_split">Boundary Split (1 vs 2 Pages Threshold)</option>
+              <option value="sparse_empty">Sparse & Empty Fields (Null Safety)</option>
+              <option value="special_characters">Special Characters, Accents & XSS</option>
+              <option value="multi_page_overflow">Multi-Page Deep CV (4+ Pages)</option>
+            </select>
+            <button class="btn btn-primary btn-sm" id="btn-run-stress-case">Load Test Case</button>
+          </div>
+          <div id="stress-case-desc" style="font-size: 0.76rem; color: #64748b; margin-top: 6px; font-style: italic;"></div>
+        </div>
+
+        <!-- Captured Console / System Errors -->
+        <div class="diag-section" id="diag-error-section">
+          <div class="diag-section-title">Recent Trapped Exceptions (<span id="diag-error-counter-text">0</span>)</div>
+          <div id="diag-error-log-list" class="diag-log-container">
+            <div style="color: #10b981; font-size: 0.78rem;">✓ No unhandled runtime errors detected.</div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="modal-footer" style="justify-content: flex-end;">
+        <button class="btn btn-secondary" onclick="closeModal('modal-diagnostics')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="tests/stress_fixtures.js"></script>
   <script src="template_data.js"></script>
   <script src="app.js"></script>
 </body>

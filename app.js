@@ -1,3 +1,63 @@
+// ==========================================
+// GLOBAL ERROR BOUNDARY & TELEMETRY
+// ==========================================
+window.__appErrors = [];
+window.addEventListener("error", (event) => {
+  const errObj = {
+    type: "error",
+    message: event.message || "Unknown error",
+    filename: event.filename ? event.filename.split("/").pop() : "unknown",
+    lineno: event.lineno,
+    colno: event.colno,
+    time: new Date().toLocaleTimeString()
+  };
+  window.__appErrors.unshift(errObj);
+  if (window.__appErrors.length > 20) window.__appErrors.pop();
+  if (typeof updateDiagnosticsUI === "function") updateDiagnosticsUI();
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  const errObj = {
+    type: "unhandledrejection",
+    message: (event.reason && (event.reason.message || event.reason.toString())) || "Unhandled Promise Rejection",
+    filename: "promise",
+    time: new Date().toLocaleTimeString()
+  };
+  window.__appErrors.unshift(errObj);
+  if (window.__appErrors.length > 20) window.__appErrors.pop();
+  if (typeof updateDiagnosticsUI === "function") updateDiagnosticsUI();
+});
+
+// Safe LocalStorage setter with quota recovery
+function safeLocalStorageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    console.warn(`[Storage Warning] Failed to write key "${key}". Attempting quota recovery...`, e);
+    if (typeof versionHistory !== "undefined" && Array.isArray(versionHistory) && versionHistory.length > 4) {
+      versionHistory = versionHistory.slice(0, Math.floor(versionHistory.length / 2));
+      try {
+        localStorage.setItem("antigravity_resume_versions", JSON.stringify(versionHistory));
+        localStorage.setItem(key, value);
+        return true;
+      } catch (retryErr) {
+        console.error("[Storage Error] Quota still exceeded after pruning snapshots", retryErr);
+      }
+    }
+    if (window.__appErrors) {
+      window.__appErrors.unshift({
+        type: "QuotaExceededError",
+        message: "Browser localStorage quota exceeded; snapshot pruned to maintain integrity.",
+        filename: "localStorage",
+        time: new Date().toLocaleTimeString()
+      });
+      if (typeof updateDiagnosticsUI === "function") updateDiagnosticsUI();
+    }
+    return false;
+  }
+}
+
 // State Management
 let state = JSON.parse(JSON.stringify(DEFAULT_RESUME_DATA));
 
@@ -39,6 +99,15 @@ document.addEventListener("DOMContentLoaded", () => {
   setupEventListeners();
   initDragResizeHandlers();
   initVersionHistory();
+  initDiagnosticsSystem();
+
+  // Proactive Font-Loading Sync
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => {
+      distributePages();
+      if (typeof updateDiagnosticsUI === "function") updateDiagnosticsUI();
+    });
+  }
 
   // Initialize history stack with pristine loaded state
   lastRecordedStateJSON = JSON.stringify(state);
@@ -2336,6 +2405,7 @@ function setupEventListeners() {
   document.getElementById("btn-export-pdf")?.addEventListener("click", prepareForPDFExport);
   document.getElementById("btn-export-json")?.addEventListener("click", exportJSON);
   document.getElementById("btn-ats-text")?.addEventListener("click", openATSModal);
+  document.getElementById("btn-diagnostics")?.addEventListener("click", openDiagnosticsModal);
   document.getElementById("btn-reset-template")?.addEventListener("click", resetTemplate);
 
   // Global Keyboard Shortcuts: Ctrl+Z (Undo), Ctrl+Y (Redo), Ctrl+S (Save)
@@ -2496,11 +2566,20 @@ function registerAndApplyFont(fontFamily) {
 
 async function extractFontsFromPDF(pdf) {
   const fontWeights = {};
+  const recordFont = (rawFamily, weight = 10) => {
+    if (!rawFamily) return;
+    const clean = cleanFontFamily(rawFamily);
+    if (clean) {
+      fontWeights[clean] = (fontWeights[clean] || 0) + weight;
+    }
+  };
+
   try {
     for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
       const page = await pdf.getPage(pageNum);
       const textContent = await page.getTextContent();
       
+      // 1. Inspect text items & text styles
       if (textContent && textContent.items) {
         textContent.items.forEach(item => {
           const str = (item.str || "").trim();
@@ -2510,25 +2589,30 @@ async function extractFontsFromPDF(pdf) {
           if (textContent.styles && textContent.styles[item.fontName]) {
             rawFamily = textContent.styles[item.fontName].fontFamily;
           }
-          if (!rawFamily && page.commonObjs && typeof page.commonObjs.get === 'function' && page.commonObjs.has(item.fontName)) {
-            const fontObj = page.commonObjs.get(item.fontName);
-            if (fontObj) {
-              rawFamily = fontObj.name || fontObj.fallbackName || fontObj.loadedName;
-            }
-          }
-          if (!rawFamily) {
-            rawFamily = item.fontName;
-          }
-
-          const clean = cleanFontFamily(rawFamily);
-          if (clean) {
-            fontWeights[clean] = (fontWeights[clean] || 0) + str.length;
+          if (rawFamily && rawFamily !== 'sans-serif' && rawFamily !== 'serif' && rawFamily !== 'monospace') {
+            recordFont(rawFamily, str.length);
           }
         });
       }
+
+      // 2. Inspect PDF.js loaded font objects in commonObjs / page objs
+      [page.commonObjs, pdf.commonObjs, page.objs].forEach(objsStore => {
+        if (!objsStore) return;
+        const store = objsStore._objs || {};
+        Object.values(store).forEach(entry => {
+          const d = entry ? (entry.data || entry) : null;
+          if (d) {
+            if (d.name) recordFont(d.name, 35);
+            if (d.loadedName) recordFont(d.loadedName, 25);
+            if (d.fallbackName && d.fallbackName !== 'sans-serif' && d.fallbackName !== 'serif') {
+              recordFont(d.fallbackName, 15);
+            }
+          }
+        });
+      });
     }
   } catch(e) {
-    console.warn("Font extraction fallback:", e);
+    console.warn("Font extraction non-critical error:", e);
   }
 
   const sortedFonts = Object.keys(fontWeights).sort((a, b) => fontWeights[b] - fontWeights[a]);
@@ -2537,6 +2621,130 @@ async function extractFontsFromPDF(pdf) {
     headingFont: sortedFonts[1] || sortedFonts[0] || null,
     allFonts: sortedFonts
   };
+}
+
+// Spatial & Column-Aware PDF Text Re-ordering
+function extractPageTextSpatially(items) {
+  if (!items || items.length === 0) return "";
+  
+  const validItems = items.filter(it => it && it.str && it.str.trim().length > 0);
+  if (validItems.length === 0) return "";
+
+  const sortTopToBottom = (a, b) => {
+    const yDiff = b.transform[5] - a.transform[5];
+    if (Math.abs(yDiff) > 5) {
+      return yDiff; // Higher y first (top of page down)
+    }
+    return a.transform[4] - b.transform[4]; // Left to right
+  };
+
+  const buildLinesFromItems = (itemsList) => {
+    if (itemsList.length === 0) return [];
+    itemsList.sort(sortTopToBottom);
+    
+    const lines = [];
+    let currentLine = [];
+    let currentY = null;
+
+    itemsList.forEach(it => {
+      const y = it.transform[5];
+      if (currentY === null || Math.abs(currentY - y) <= 4.5) {
+        currentLine.push(it.str.trim());
+        if (currentY === null) currentY = y;
+      } else {
+        if (currentLine.length > 0) {
+          lines.push(currentLine.join(" "));
+        }
+        currentLine = [it.str.trim()];
+        currentY = y;
+      }
+    });
+    if (currentLine.length > 0) {
+      lines.push(currentLine.join(" "));
+    }
+    return lines;
+  };
+
+  const xs = validItems.map(it => it.transform[4]);
+  const ys = validItems.map(it => it.transform[5]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const width = maxX - minX;
+  const height = maxY - minY;
+
+  const splitX = minX + width * 0.60;
+  const headerThresholdY = maxY - height * 0.26;
+
+  const headerItems = [];
+  const leftItems = [];
+  const rightItems = [];
+
+  validItems.forEach(it => {
+    const x = it.transform[4];
+    const y = it.transform[5];
+    if (y > headerThresholdY) {
+      headerItems.push(it);
+    } else if (x < splitX) {
+      leftItems.push(it);
+    } else {
+      rightItems.push(it);
+    }
+  });
+
+  if (leftItems.length >= 4 && rightItems.length >= 4) {
+    const headerLines = buildLinesFromItems(headerItems);
+    const leftLines = buildLinesFromItems(leftItems);
+    const rightLines = buildLinesFromItems(rightItems);
+    return [...headerLines, ...leftLines, ...rightLines].join("\n");
+  } else {
+    return buildLinesFromItems(validItems).join("\n");
+  }
+}
+
+// Letter-Spacing / Tracking Untracking Helper
+function unspaceLetterSpacing(str) {
+  if (!str) return "";
+  let s = str.trim();
+  if (/\b([A-Za-z]\s+){2,}[A-Za-z]\b/.test(s)) {
+    if (s.includes("  ")) {
+      s = s.split(/\s{2,}/).map(word => word.replace(/\s+/g, '')).join(" ");
+    } else {
+      const chars = s.split(/\s+/);
+      if (chars.every(c => c.length === 1)) {
+        s = chars.join("");
+      }
+    }
+  }
+  return s;
+}
+
+// Heading normalizer immune to letter tracking/spacing
+function normalizeSectionHeading(line) {
+  if (!line || line.length > 55) return null;
+  const rawLetters = line.replace(/[^A-Za-z]/g, '').toUpperCase();
+  
+  if (/^(?:PROFESSIONAL)?SUMMARY$|^PROFILE$|^ABOUTME$|^OBJECTIVE$|^EXECUTIVESUMMARY$/.test(rawLetters)) {
+    return 'summary';
+  }
+  if (/^(?:CORE|TECHNICAL|KEY)?SKILLS$|^COMPETENCIES$|^AREASOFEXPERTISE$|^TECHNOLOGIES$|^TOOLS$/.test(rawLetters)) {
+    return 'skills';
+  }
+  if (/^(?:WORK|PROFESSIONAL|RELEVANT|EMPLOYMENT)?EXPERIENCE$|^WORKHISTORY$|^EMPLOYMENTHISTORY$/.test(rawLetters)) {
+    return 'experience';
+  }
+  if (/^EDUCATION$|^ACADEMICBACKGROUND$|^DEGREES$|^EDUCATIONTRAINING$/.test(rawLetters)) {
+    return 'education';
+  }
+  if (/^CERTIFICATIONS$|^CERTIFICATES$|^LICENSESCERTIFICATIONS$/.test(rawLetters)) {
+    return 'certifications';
+  }
+  if (/^LANGUAGESACHIEVEMENTS$|^ACHIEVEMENTS$|^AWARDS$|^HONORS$|^LANGUAGES$/.test(rawLetters)) {
+    return 'achievements';
+  }
+  if (/^CONTACT$|^CONTACTME$|^CONTACTINFO$|^CONTACTINFORMATION$/.test(rawLetters)) {
+    return 'contact';
+  }
+  return null;
 }
 
 // ==========================================
@@ -2576,7 +2784,7 @@ function parseResumeText(fullText, fileName = "") {
   // 1. Contact information regexes
   const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/i;
   const phoneRegex = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b/;
-  const linkedinRegex = /(?:https?:\/\/)?(?:www\.)?linkedin\.com\/(?:in\/)?[\w-]+|(?:\b|\/)(?:in\/[a-zA-Z0-9_-]+)/i;
+  const linkedinRegex = /(?:linkedin\.com\/(?:in\/)?[\w-]+|in\/[\w-]+)/i;
   const webRegex = /(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9-]+\.(?:github\.io|gitlab\.io|dev|tech|me|app|com|org|io)(?:\/[^\s,]*)?)/i;
   const locationRegex = /\b([A-Z][a-zA-Z\s.-]+,\s*[A-Z]{2}(?:\s+\d{5})?)\b/;
 
@@ -2589,67 +2797,64 @@ function parseResumeText(fullText, fileName = "") {
   const linkedinMatch = fullText.match(linkedinRegex);
   if (linkedinMatch) result.header.linkedin = linkedinMatch[0];
 
-  const webMatch = fullText.match(webRegex);
-  if (webMatch && !webMatch[0].includes("linkedin.com") && !webMatch[0].includes("@")) {
-    result.header.website = webMatch[0];
+  // Prevent email domain (e.g. gmail.com) from being captured as candidate portfolio website
+  const webMatches = fullText.match(new RegExp(webRegex, 'gi'));
+  if (webMatches) {
+    const emailDomain = emailMatch ? emailMatch[0].split('@')[1].toLowerCase() : '';
+    const validWeb = webMatches.find(w => {
+      const cleanW = w.replace(/^https?:\/\//i, '').replace(/^www\./i, '').toLowerCase();
+      if (cleanW === emailDomain || cleanW.startsWith(emailDomain)) return false;
+      if (/^(gmail\.com|yahoo\.com|outlook\.com|hotmail\.com|icloud\.com)/i.test(cleanW)) return false;
+      return true;
+    });
+    if (validWeb) result.header.website = validWeb;
   }
 
   const locMatch = fullText.match(locationRegex);
   if (locMatch) result.header.address = locMatch[1];
 
-  // 2. Identify candidate Name & Professional Title from top lines
-  let nameCandidates = [];
-  for (let i = 0; i < Math.min(8, rawLines.length); i++) {
-    const line = rawLines[i];
-    if (emailRegex.test(line) || phoneRegex.test(line) || /linkedin\.com|github\.com|www\./i.test(line)) continue;
-    if (/^(resume|curriculum vitae|cv|portfolio|contact|summary|profile|experience)$/i.test(line)) continue;
-    if (/^[A-Za-zÀ-ÖØ-öø-ÿ\s.'-]+$/.test(line) && line.split(/\s+/).length >= 2 && line.split(/\s+/).length <= 5) {
-      nameCandidates.push({ line, index: i });
+  // 2. Identify candidate Name, Title & Narrative Summary from header block
+  let detectedSummary = "";
+  for (let i = 0; i < Math.min(10, rawLines.length); i++) {
+    const line = unspaceLetterSpacing(rawLines[i]);
+    const headingKey = normalizeSectionHeading(line);
+    if (headingKey) break; // Reached first section heading!
+
+    if (emailRegex.test(line) || phoneRegex.test(line) || /linkedin\.com|github\.com/i.test(line)) continue;
+    if (/^(resume|curriculum vitae|cv|portfolio)$/i.test(line.replace(/[^a-zA-Z]/g, ''))) continue;
+
+    // Narrative summary paragraph placed directly under title without heading
+    if (line.length > 55 && result.header.fullName) {
+      detectedSummary = detectedSummary ? (detectedSummary + " " + line) : line;
+      continue;
+    }
+
+    if (!result.header.fullName && /^[A-Za-zÀ-ÖØ-öø-ÿ\s.'-]+$/.test(line) && line.split(/\s+/).length >= 2 && line.split(/\s+/).length <= 6) {
+      result.header.fullName = line;
+    } else if (result.header.fullName && !result.header.professionalTitle && line.length < 65) {
+      result.header.professionalTitle = line;
     }
   }
 
-  if (nameCandidates.length > 0) {
-    result.header.fullName = nameCandidates[0].line;
-    const titleIdx = nameCandidates[0].index + 1;
-    if (titleIdx < rawLines.length) {
-      const candidateTitle = rawLines[titleIdx];
-      if (!emailRegex.test(candidateTitle) && !phoneRegex.test(candidateTitle) && candidateTitle.length < 65) {
-        result.header.professionalTitle = candidateTitle;
-      }
-    }
-  } else if (rawLines.length > 0) {
-    result.header.fullName = rawLines[0].substring(0, 40);
+  if (detectedSummary) {
+    result.summary = detectedSummary;
   }
 
   // 3. Section Boundary Parsing
-  const SECTION_PATTERNS = [
-    { key: 'summary', regex: /^(?:PROFESSIONAL\s+)?(?:SUMMARY|PROFILE|ABOUT\s+ME|OBJECTIVE|EXECUTIVE\s+SUMMARY)\b/i },
-    { key: 'skills', regex: /^(?:CORE\s+|TECHNICAL\s+|KEY\s+)?(?:SKILLS|COMPETENCIES|AREAS\s+OF\s+EXPERTISE|TECHNOLOGIES|TOOLS)\b/i },
-    { key: 'experience', regex: /^(?:PROFESSIONAL\s+|WORK\s+|RELEVANT\s+|EMPLOYMENT\s+)?(?:EXPERIENCE|HISTORY|WORK\s+HISTORY|EMPLOYMENT)\b/i },
-    { key: 'education', regex: /^(?:EDUCATION|ACADEMIC\s+BACKGROUND|DEGREES|EDUCATION\s+&\s+TRAINING)\b/i },
-    { key: 'certifications', regex: /^(?:CERTIFICATIONS|CERTIFICATES|LICENSES(?:\s+&\s+CERTIFICATIONS)?)\b/i },
-    { key: 'achievements', regex: /^(?:LANGUAGES(?:\s+&\s+ACHIEVEMENTS)?|ACHIEVEMENTS|AWARDS|HONORS|PUBLICATIONS)\b/i }
-  ];
-
   const sectionBuckets = {
     summary: [],
     skills: [],
     experience: [],
     education: [],
     certifications: [],
-    achievements: []
+    achievements: [],
+    contact: []
   };
 
   let currentSection = null;
   for (let i = 0; i < rawLines.length; i++) {
-    const line = rawLines[i];
-    let matchedKey = null;
-    for (const sec of SECTION_PATTERNS) {
-      if (sec.regex.test(line) && line.length < 45) {
-        matchedKey = sec.key;
-        break;
-      }
-    }
+    const line = unspaceLetterSpacing(rawLines[i]);
+    const matchedKey = normalizeSectionHeading(line);
 
     if (matchedKey) {
       currentSection = matchedKey;
@@ -2661,19 +2866,29 @@ function parseResumeText(fullText, fileName = "") {
     }
   }
 
-  // 4. Parse Summary
+  // Explicit summary section overrides implicit narrative
   if (sectionBuckets.summary.length > 0) {
     result.summary = sectionBuckets.summary.join(" ");
   }
 
-  // 5. Parse Skills
+  // Contact section: parse address if not yet found
+  if (sectionBuckets.contact.length > 0 && !result.header.address) {
+    sectionBuckets.contact.forEach(l => {
+      if (!emailRegex.test(l) && !phoneRegex.test(l) && locationRegex.test(l)) {
+        result.header.address = (l.match(locationRegex) || [l])[0];
+      }
+    });
+  }
+
+  // 4. Parse Skills
   if (sectionBuckets.skills.length > 0) {
     let allSkills = [];
     sectionBuckets.skills.forEach(line => {
-      const parts = line.split(/[,•|;▪▫›\t]+/).map(p => p.trim()).filter(p => p.length > 0);
+      const clean = line.replace(/^[•\-*–—▪▫›\u2014\u2013\u2022]\s*/, '').trim();
+      const parts = clean.split(/[,•|;▪▫›\t]+/).map(p => p.trim()).filter(p => p.length > 0);
       allSkills.push(...parts);
     });
-    allSkills = allSkills.filter(s => s.length > 1 && s.length < 35);
+    allSkills = allSkills.filter(s => s.length > 1 && s.length < 40);
     if (allSkills.length > 0) {
       const col1 = [], col2 = [], col3 = [];
       allSkills.forEach((skill, idx) => {
@@ -2689,17 +2904,17 @@ function parseResumeText(fullText, fileName = "") {
     }
   }
 
-  // 6. Parse Work Experience
+  // 5. Parse Work Experience
   if (sectionBuckets.experience.length > 0) {
-    const dateRegex = /(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|\d{4})\s*(?:–|-|to)\s*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|\d{4}|Present|Current)/i;
+    const dateRegex = /(?:(?:Jan|Feb|Mar|Apr|May|Mayu|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|\d{4})\s*(?:–|—|-|to)\s*(?:(?:Jan|Feb|Mar|Apr|May|Mayu|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{4}|\d{4}|Present|Current)/i;
     const expLines = sectionBuckets.experience;
     const jobs = [];
     let currentJob = null;
 
     for (let i = 0; i < expLines.length; i++) {
       const line = expLines[i];
-      const isBullet = /^[•\-*–▪▫›]/.test(line);
-      const cleanLine = line.replace(/^[•\-*–▪▫›]\s*/, '').trim();
+      const isBullet = /^[•\-*–—▪▫›\u2014\u2013\u2022]/.test(line);
+      const cleanLine = line.replace(/^[•\-*–—▪▫›\u2014\u2013\u2022]\s*/, '').trim();
       const hasDate = dateRegex.test(line);
 
       if (isBullet) {
@@ -2718,15 +2933,24 @@ function parseResumeText(fullText, fileName = "") {
         currentJob.bullets.push(cleanLine);
       } else if (hasDate) {
         const dateMatch = line.match(dateRegex);
-        const dateStr = dateMatch ? dateMatch[0] : "";
-        const otherText = line.replace(dateRegex, '').replace(/[|•–-]/g, ' ').trim();
+        let dateStr = dateMatch ? dateMatch[0] : "";
+        dateStr = dateStr.replace(/Mayu/gi, 'May');
+        const otherText = line.replace(dateRegex, '').replace(/[|•–—\-]/g, ' ').trim();
 
         if (!currentJob || currentJob.bullets.length > 0 || currentJob.dateRange) {
+          let jobTitle = otherText || "Job Position";
+          let jobCompany = "";
+          let jobLocation = "";
+          if (otherText.includes('|')) {
+            const parts = otherText.split('|').map(p => p.trim());
+            jobCompany = parts[0];
+            jobLocation = parts[1] || "";
+          }
           currentJob = {
             id: "exp-" + (jobs.length + 1) + "-" + Date.now(),
-            title: otherText || "Job Position",
-            company: "",
-            location: "",
+            title: jobTitle,
+            company: jobCompany,
+            location: jobLocation,
             dateRange: dateStr,
             description: "",
             bullets: []
@@ -2735,18 +2959,30 @@ function parseResumeText(fullText, fileName = "") {
         } else {
           currentJob.dateRange = dateStr;
           if (otherText) {
-            if (!currentJob.company) currentJob.company = otherText;
-            else if (!currentJob.title) currentJob.title = otherText;
+            if (otherText.includes('|')) {
+              const parts = otherText.split('|').map(p => p.trim());
+              currentJob.company = parts[0];
+              currentJob.location = parts[1] || currentJob.location;
+            } else if (!currentJob.company) {
+              currentJob.company = otherText;
+            }
           }
         }
       } else {
         if (!currentJob || currentJob.bullets.length > 0) {
           if (line.length < 65) {
+            let jobTitle = line;
+            let jobLocation = "";
+            if (line.includes(',')) {
+              const parts = line.split(',');
+              jobTitle = parts[0].trim();
+              jobLocation = parts.slice(1).join(',').trim();
+            }
             currentJob = {
               id: "exp-" + (jobs.length + 1) + "-" + Date.now(),
-              title: line,
+              title: jobTitle,
               company: "",
-              location: "",
+              location: jobLocation,
               dateRange: "",
               description: "",
               bullets: []
@@ -2756,14 +2992,12 @@ function parseResumeText(fullText, fileName = "") {
             currentJob.bullets[currentJob.bullets.length - 1] += " " + line;
           }
         } else {
-          if (!currentJob.company) {
-            if (line.includes('|')) {
-              const parts = line.split('|').map(p => p.trim());
-              currentJob.company = parts[0];
-              currentJob.location = parts[1] || "";
-            } else {
-              currentJob.company = line;
-            }
+          if (line.includes('|')) {
+            const parts = line.split('|').map(p => p.trim());
+            currentJob.company = parts[0];
+            currentJob.location = parts[1] || currentJob.location;
+          } else if (!currentJob.company) {
+            currentJob.company = line;
           } else if (!currentJob.location && line.includes(',')) {
             currentJob.location = line;
           } else if (!currentJob.description) {
@@ -2778,34 +3012,40 @@ function parseResumeText(fullText, fileName = "") {
     }
   }
 
-  // 7. Parse Education
+  // 6. Parse Education
   if (sectionBuckets.education.length > 0) {
     const eduLines = sectionBuckets.education;
     const eduEntries = [];
     let currentEdu = null;
 
-    const degreeRegex = /(?:Bachelor|Master|Associate|Doctor|B\.?S\.?|B\.?A\.?|M\.?S\.?|M\.?B\.?A\.?|Ph\.?D\.?|Diploma|Degree)\b/i;
-    const yearRegex = /\b(19\d{2}|20\d{2})\b/;
+    const degreeRegex = /(?:Bachelor|Master|Associate|Doctor|B\.?S\.?|B\.?A\.?|M\.?S\.?|M\.?B\.?A\.?|Ph\.?D\.?|Diploma|Degree|High\s+School)\b/i;
+    const instRegex = /(?:School|University|College|Academy|Institute|Polytechnic)\b/i;
+    const yearRegex = /\b(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+)?(19\d{2}|20\d{2})(?:\s*[-–—]\s*(?:(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+)?(19\d{2}|20\d{2}))?\b/i;
 
     eduLines.forEach(line => {
-      const clean = line.replace(/^[•\-*–▪▫›]\s*/, '').trim();
+      const clean = line.replace(/^[•\-*–—▪▫›\u2014\u2013\u2022]\s*/, '').trim();
       const hasDegree = degreeRegex.test(clean);
-      const hasYear = yearRegex.test(clean);
+      const hasInst = instRegex.test(clean);
+      const dateMatch = clean.match(yearRegex);
 
-      if (hasDegree || !currentEdu) {
-        const yearMatch = clean.match(yearRegex);
+      if (!currentEdu) {
         currentEdu = {
           id: "edu-" + (eduEntries.length + 1) + "-" + Date.now(),
-          degree: clean,
-          institution: "",
-          dateRange: yearMatch ? `Graduated: ${yearMatch[0]}` : ""
+          degree: hasDegree ? clean : "High School Diploma",
+          institution: hasInst ? clean : "",
+          dateRange: dateMatch ? dateMatch[0] : ""
         };
         eduEntries.push(currentEdu);
-      } else if (currentEdu && !currentEdu.institution) {
-        currentEdu.institution = clean;
-        const yearMatch = clean.match(yearRegex);
-        if (yearMatch && !currentEdu.dateRange) {
-          currentEdu.dateRange = `Graduated: ${yearMatch[0]}`;
+      } else {
+        if (hasInst && !currentEdu.institution) {
+          currentEdu.institution = clean;
+          if (currentEdu.degree === clean) currentEdu.degree = "High School Diploma";
+        } else if (hasDegree) {
+          currentEdu.degree = clean;
+        } else if (dateMatch && !currentEdu.dateRange) {
+          currentEdu.dateRange = dateMatch[0];
+        } else if (!currentEdu.institution) {
+          currentEdu.institution = clean;
         }
       }
     });
@@ -2815,18 +3055,18 @@ function parseResumeText(fullText, fileName = "") {
     }
   }
 
-  // 8. Parse Certifications
+  // 7. Parse Certifications
   if (sectionBuckets.certifications.length > 0) {
     result.certifications = sectionBuckets.certifications
-      .map(line => line.replace(/^[•\-*–▪▫›]\s*/, '').trim())
+      .map(line => line.replace(/^[•\-*–—▪▫›\u2014\u2013\u2022]\s*/, '').trim())
       .filter(line => line.length > 2)
       .map((line, idx) => ({ id: "cert-" + (idx + 1) + "-" + Date.now(), name: line }));
   }
 
-  // 9. Parse Achievements / Languages
+  // 8. Parse Achievements / Languages
   if (sectionBuckets.achievements.length > 0) {
     result.achievements = sectionBuckets.achievements
-      .map(line => line.replace(/^[•\-*–▪▫›]\s*/, '').trim())
+      .map(line => line.replace(/^[•\-*–—▪▫›\u2014\u2013\u2022]\s*/, '').trim())
       .filter(line => line.length > 2)
       .map((line, idx) => ({ id: "ach-" + (idx + 1) + "-" + Date.now(), text: line }));
   }
@@ -2885,8 +3125,10 @@ async function handleDocUpload(e) {
         for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
           const page = await pdf.getPage(pageNum);
           const textContent = await page.getTextContent();
-          const pageStrings = textContent.items.map(item => item.str);
-          fullText += pageStrings.join("\n") + "\n";
+          
+          // Spatial multi-column aware line extraction
+          const pageText = extractPageTextSpatially(textContent.items);
+          fullText += pageText + "\n\n";
         }
 
         // Extract typography & dominant font
@@ -3285,45 +3527,51 @@ function openATSModal() {
   const codeBlock = document.getElementById("ats-text-output");
   if (!modal || !codeBlock) return;
 
-  const h = state.header;
-  let text = `${h.fullName.toUpperCase()}\n${h.professionalTitle.toUpperCase()}\n`;
-  text += `${h.phone} | ${h.email} | ${h.address} | ${h.linkedin} | ${h.website}\n\n`;
+  const h = state.header || {};
+  let text = `${(h.fullName || '').toUpperCase()}\n${(h.professionalTitle || '').toUpperCase()}\n`;
+  const contactParts = [h.phone, h.email, h.address, h.linkedin, h.website].filter(Boolean);
+  if (contactParts.length) text += contactParts.join(" | ") + "\n\n";
 
-  state.settings.sectionOrder.forEach(secKey => {
-    const title = (state.settings.sectionTitles[secKey] || secKey).toUpperCase();
+  const sectionOrder = (state.settings && state.settings.sectionOrder) || [
+    "summary", "skills", "experience", "education", "certifications", "achievements"
+  ];
+  const sectionTitles = (state.settings && state.settings.sectionTitles) || {};
+
+  sectionOrder.forEach(secKey => {
+    const title = (sectionTitles[secKey] || secKey).toUpperCase();
     text += `=== ${title} ===\n`;
 
     if (secKey === "summary" && state.summary) {
       text += `${state.summary}\n\n`;
     }
-    else if (secKey === "skills") {
+    else if (secKey === "skills" && Array.isArray(state.skills)) {
       state.skills.forEach(col => {
-        col.items.forEach(item => { text += `• ${item}\n`; });
+        (col.items || []).forEach(item => { text += `• ${item}\n`; });
       });
       text += `\n`;
     }
-    else if (secKey === "experience") {
+    else if (secKey === "experience" && Array.isArray(state.experience)) {
       state.experience.forEach(exp => {
-        text += `${exp.title} | ${exp.company} (${exp.location}) -- ${exp.dateRange}\n`;
+        text += `${exp.title || ''} | ${exp.company || ''} (${exp.location || ''}) -- ${exp.dateRange || ''}\n`;
         if (exp.description) {
           text += `  ${exp.description}\n`;
         }
-        exp.bullets.forEach(b => { text += `  - ${b}\n`; });
+        (exp.bullets || []).forEach(b => { text += `  - ${b}\n`; });
         text += `\n`;
       });
     }
-    else if (secKey === "education") {
+    else if (secKey === "education" && Array.isArray(state.education)) {
       state.education.forEach(edu => {
-        text += `${edu.degree} - ${edu.institution} (${edu.dateRange})\n`;
+        text += `${edu.degree || ''} - ${edu.institution || ''} (${edu.dateRange || ''})\n`;
       });
       text += `\n`;
     }
-    else if (secKey === "certifications") {
-      state.certifications.forEach(c => { text += `• ${c.name}\n`; });
+    else if (secKey === "certifications" && Array.isArray(state.certifications)) {
+      state.certifications.forEach(c => { text += `• ${c.name || ''}\n`; });
       text += `\n`;
     }
-    else if (secKey === "achievements") {
-      state.achievements.forEach(a => { text += `• ${a.text}\n`; });
+    else if (secKey === "achievements" && Array.isArray(state.achievements)) {
+      state.achievements.forEach(a => { text += `• ${a.text || ''}\n`; });
       text += `\n`;
     }
   });
@@ -3666,11 +3914,13 @@ function executeDocumentImport() {
   }
 
   // 2. Prepare target state
-  let targetState = JSON.parse(JSON.stringify(DEFAULT_RESUME_DATA));
+  let targetState;
   if (isThemeOnly) {
     targetState = JSON.parse(JSON.stringify(state));
-  } else {
-    // Populate parsed resume data
+  } else if (isCurrent) {
+    // Preserve existing resume content and overlay parsed sections
+    targetState = JSON.parse(JSON.stringify(state));
+
     if (parsedResume.header.fullName) targetState.header.fullName = parsedResume.header.fullName;
     if (parsedResume.header.professionalTitle) targetState.header.professionalTitle = parsedResume.header.professionalTitle;
     if (parsedResume.header.email) targetState.header.email = parsedResume.header.email;
@@ -3695,6 +3945,31 @@ function executeDocumentImport() {
     if (parsedResume.achievements && parsedResume.achievements.length > 0) {
       targetState.achievements = parsedResume.achievements;
     }
+  } else {
+    // New variant: Clean structure with ONLY the candidate's actual data - NO dummy placeholders
+    targetState = {
+      header: {
+        fullName: parsedResume.header.fullName || "Candidate Name",
+        professionalTitle: parsedResume.header.professionalTitle || "Professional Title",
+        phone: parsedResume.header.phone || "",
+        email: parsedResume.header.email || "",
+        address: parsedResume.header.address || "",
+        linkedin: parsedResume.header.linkedin || "",
+        website: parsedResume.header.website || ""
+      },
+      summary: parsedResume.summary || "",
+      skills: (parsedResume.skills && parsedResume.skills.some(c => c.items && c.items.length > 0))
+        ? parsedResume.skills
+        : [{ col: 1, items: [] }, { col: 2, items: [] }, { col: 3, items: [] }],
+      experience: parsedResume.experience || [],
+      education: parsedResume.education || [],
+      certifications: parsedResume.certifications || [],
+      achievements: parsedResume.achievements || [],
+      settings: JSON.parse(JSON.stringify(DEFAULT_RESUME_DATA.settings)),
+      entryHeights: {},
+      sectionPaddings: {},
+      docThemes: {}
+    };
   }
 
   // Apply themes
@@ -3755,3 +4030,220 @@ function executeDocumentImport() {
 
   pendingDocImport = null;
 }
+
+// ==========================================
+// SYSTEM DIAGNOSTICS & ISSUE REPRODUCTION
+// ==========================================
+function initDiagnosticsSystem() {
+  document.getElementById("btn-copy-diag-bundle")?.addEventListener("click", copyDiagnosticBundle);
+  document.getElementById("btn-download-diag-bundle")?.addEventListener("click", downloadDiagnosticBundle);
+  document.getElementById("btn-load-diag-bundle")?.addEventListener("click", loadDiagnosticBundleFromInput);
+  document.getElementById("btn-run-stress-case")?.addEventListener("click", runSelectedStressTest);
+  document.getElementById("select-stress-test")?.addEventListener("change", updateStressTestDesc);
+
+  updateStressTestDesc();
+}
+
+function openDiagnosticsModal() {
+  updateDiagnosticsUI();
+  const modal = document.getElementById("modal-diagnostics");
+  if (modal) modal.classList.add("active");
+}
+
+function updateDiagnosticsUI() {
+  const fontEl = document.getElementById("diag-font-status");
+  const dprEl = document.getElementById("diag-dpr");
+  const viewportEl = document.getElementById("diag-viewport");
+  const pagesEl = document.getElementById("diag-pages");
+  const errCountEl = document.getElementById("diag-error-count");
+  const errTextEl = document.getElementById("diag-error-counter-text");
+  const storageEl = document.getElementById("diag-storage-count");
+  const errListEl = document.getElementById("diag-error-log-list");
+
+  if (fontEl) {
+    const status = (document.fonts && document.fonts.status) || "unknown";
+    fontEl.textContent = status.toUpperCase();
+    fontEl.className = `diag-metric-value ${status === 'loaded' ? 'diag-status-ok' : 'diag-status-warn'}`;
+  }
+
+  if (dprEl) {
+    const dpr = window.devicePixelRatio || 1;
+    dprEl.textContent = `${dpr}x ${dpr > 1 ? '(HiDPI)' : '(Standard)'}`;
+  }
+
+  if (viewportEl) {
+    viewportEl.textContent = `${window.innerWidth}×${window.innerHeight} (${screen.width}×${screen.height})`;
+  }
+
+  if (pagesEl) {
+    const pages = document.querySelectorAll(".resume-paper-page").length;
+    pagesEl.textContent = `${pages} Page${pages > 1 ? 's' : ''}`;
+  }
+
+  const errors = window.__appErrors || [];
+  if (errCountEl) {
+    errCountEl.textContent = errors.length;
+    errCountEl.className = `diag-metric-value ${errors.length === 0 ? 'diag-status-ok' : 'diag-status-err'}`;
+  }
+  if (errTextEl) {
+    errTextEl.textContent = errors.length;
+  }
+
+  if (storageEl) {
+    const count = (typeof versionHistory !== "undefined" && Array.isArray(versionHistory)) ? versionHistory.length : 0;
+    storageEl.textContent = `${count} snapshot${count !== 1 ? 's' : ''}`;
+  }
+
+  if (errListEl) {
+    if (errors.length === 0) {
+      errListEl.innerHTML = `<div style="color: #10b981; font-size: 0.78rem;">✓ No unhandled runtime errors detected.</div>`;
+    } else {
+      errListEl.innerHTML = errors.map(err => {
+        return `<div class="diag-log-item"><strong>[${err.time}]</strong> ${escapeHTML(err.message)} <span style="opacity: 0.7;">(${err.filename || 'app'})</span></div>`;
+      }).join("");
+    }
+  }
+
+  updateStressTestDesc();
+}
+
+function updateStressTestDesc() {
+  const select = document.getElementById("select-stress-test");
+  const descEl = document.getElementById("stress-case-desc");
+  if (!select || !descEl || !window.STRESS_FIXTURES) return;
+  const fixture = window.STRESS_FIXTURES[select.value];
+  if (fixture) {
+    descEl.textContent = fixture.description;
+  }
+}
+
+function generateDiagnosticBundle() {
+  const p1 = document.getElementById("page-1");
+  const p2 = document.getElementById("page-2");
+
+  return {
+    timestamp: new Date().toISOString(),
+    crucesBuilderVersion: "1.0.0",
+    clientEnvironment: {
+      userAgent: navigator.userAgent,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      screenResolution: `${window.screen?.width || 0}x${window.screen?.height || 0}`,
+      viewport: `${window.innerWidth}x${window.innerHeight}`,
+      fontsStatus: (document.fonts && document.fonts.status) || "unknown",
+      online: navigator.onLine
+    },
+    domTelemetry: {
+      pageCount: document.querySelectorAll(".resume-paper-page").length,
+      page1Height: p1 ? Math.round(p1.getBoundingClientRect().height) : null,
+      page1ScrollHeight: p1 ? p1.scrollHeight : null,
+      page2Height: p2 ? Math.round(p2.getBoundingClientRect().height) : null,
+      page2ScrollHeight: p2 ? p2.scrollHeight : null,
+      sectionOrder: state.settings?.sectionOrder || []
+    },
+    storageTelemetry: {
+      activeProfileId: currentProfileId,
+      totalProfiles: resumeProfiles.length,
+      versionSnapshotsCount: (typeof versionHistory !== "undefined" && Array.isArray(versionHistory)) ? versionHistory.length : 0
+    },
+    trappedErrors: window.__appErrors || [],
+    resumeState: state
+  };
+}
+
+function copyDiagnosticBundle() {
+  const bundle = generateDiagnosticBundle();
+  const text = JSON.stringify(bundle, null, 2);
+  navigator.clipboard.writeText(text).then(() => {
+    showToast("✓ Diagnostic Bundle copied to clipboard!");
+  }).catch(() => {
+    showToast("⚠️ Could not access clipboard; try Download JSON instead.");
+  });
+}
+
+function downloadDiagnosticBundle() {
+  const bundle = generateDiagnosticBundle();
+  const text = JSON.stringify(bundle, null, 2);
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const dateStr = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  a.href = url;
+  a.download = `cruces-resume-diagnostic-${dateStr}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast("✓ Diagnostic JSON downloaded!");
+}
+
+function loadDiagnosticBundleFromInput() {
+  const inputEl = document.getElementById("diag-import-input");
+  if (!inputEl) return;
+  const raw = inputEl.value.trim();
+  if (!raw) {
+    showToast("⚠️ Please paste a diagnostic bundle JSON first.");
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const targetState = parsed.resumeState || (parsed.header && parsed.settings ? parsed : null);
+
+    if (!targetState || !targetState.header || !targetState.settings) {
+      showToast("⚠️ Invalid diagnostic format: resumeState missing or corrupted.");
+      return;
+    }
+
+    recordVersionSnapshot("Pre-Diagnostic Load Backup", false, false, "Pre-Diagnostic Load Backup");
+
+    state = targetState;
+    if (!state.entryHeights) state.entryHeights = {};
+    if (!state.sectionPaddings) state.sectionPaddings = {};
+    if (!state.docThemes) state.docThemes = {};
+    if (!state.settings.sectionOrder) {
+      state.settings.sectionOrder = ["summary", "skills", "experience", "education", "certifications", "achievements"];
+    }
+
+    populateFormFields();
+    applySettings();
+    renderCanvas();
+    saveState(true);
+    closeModal("modal-diagnostics");
+    inputEl.value = "";
+    showToast("✓ Diagnostic state loaded & canvas rendered!");
+  } catch (err) {
+    console.error("Failed to parse diagnostic JSON:", err);
+    showToast("⚠️ JSON parse error: " + err.message);
+  }
+}
+
+function runSelectedStressTest() {
+  const select = document.getElementById("select-stress-test");
+  if (!select || !window.STRESS_FIXTURES) return;
+  const key = select.value;
+  const fixture = window.STRESS_FIXTURES[key];
+  if (!fixture || !fixture.data) {
+    showToast(`⚠️ Test case "${key}" not found.`);
+    return;
+  }
+
+  recordVersionSnapshot(`Pre-Stress-Test Backup (${fixture.name})`, false, false, `Backup before ${fixture.name}`);
+
+  state = JSON.parse(JSON.stringify(fixture.data));
+  if (!state.entryHeights) state.entryHeights = {};
+  if (!state.sectionPaddings) state.sectionPaddings = {};
+  if (!state.docThemes) state.docThemes = {};
+  if (!state.settings.sectionOrder) {
+    state.settings.sectionOrder = ["summary", "skills", "experience", "education", "certifications", "achievements"];
+  }
+
+  populateFormFields();
+  applySettings();
+  renderCanvas();
+  saveState(true);
+  closeModal("modal-diagnostics");
+  showToast(`✓ Loaded stress case: ${fixture.name}`);
+}
+
+window.openDiagnosticsModal = openDiagnosticsModal;
+window.generateDiagnosticBundle = generateDiagnosticBundle;

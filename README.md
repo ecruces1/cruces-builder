@@ -67,18 +67,21 @@ Since this is a client-side project with zero build dependencies, you can open i
 ### Option 2: Local HTTP Server (Recommended)
 To prevent browser CORS restrictions when loading local assets or external fonts:
 
-**Using Python:**
+**Using Node.js Server (Recommended):**
 ```bash
-# Python 3
-python -m http.server 8000
+npm start
+# or: node server.js
 ```
+Then visit `http://localhost:3000` in your browser.
 
-**Using Node.js (via `npx serve`):**
+**Alternative Local Servers:**
 ```bash
+# Python
+python -m http.server 8000
+
+# or npx serve
 npx serve .
 ```
-
-Then visit `http://localhost:8000` (or the port specified) in your browser.
 
 ---
 

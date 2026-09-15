@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "test": "node tests/stress-test.js",
     "build": "echo 'Static site ready for deployment'"
   },
   "keywords": [

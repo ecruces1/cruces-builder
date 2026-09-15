@@ -1844,9 +1844,105 @@ textarea.form-control {
     size: 8.5in 11in;
     margin: 0;
   }
+  body, .resume-paper-page {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
   [contenteditable="true"],
   [contenteditable="false"] {
     outline: none !important;
     background: transparent !important;
   }
 }
+
+/* ==========================================
+   SYSTEM DIAGNOSTICS & ISSUE REPRODUCTION
+   ========================================== */
+.res-header, .res-section, .res-entry, .res-contact-bar {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+.diag-section {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.diag-section-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.diag-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.diag-metric-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.diag-metric-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.diag-metric-value {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.diag-status-ok {
+  color: #059669 !important;
+}
+
+.diag-status-warn {
+  color: #d97706 !important;
+}
+
+.diag-status-err {
+  color: #dc2626 !important;
+}
+
+.diag-log-container {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px;
+  max-height: 120px;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 0.74rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.diag-log-item {
+  padding: 4px 6px;
+  background: #fef2f2;
+  border-left: 3px solid #ef4444;
+  color: #991b1b;
+  border-radius: 3px;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
