@@ -35,6 +35,8 @@ reference-images/
 reference-images/**
 samples/
 samples/**
+templates/
+templates/**
 *.pdf
 
 

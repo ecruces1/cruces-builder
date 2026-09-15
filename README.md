@@ -90,7 +90,6 @@ Then visit `http://localhost:8000` (or the port specified) in your browser.
 ├── app.js                # Core state management, PDF parsing, history, and rendering logic
 ├── template_data.js      # Default starter template structure and sample resume content
 ├── package.json          # Web app metadata & scripts for hosting / deployment
-├── templates/            # Adobe Illustrator (.ai) vector templates & reference layouts
 └── README.md             # Project documentation
 ```
 
