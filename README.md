@@ -60,7 +60,7 @@ The editor provides a live, dual-pane WYSIWYG workspace where users can fine-tun
 Since this is a client-side project with zero build dependencies, you can open it immediately:
 1. Clone or download the repository:
    ```bash
-   git clone https://github.com/your-username/resume-generation.git
+   git clone https://github.com/ecruces1/cruces-builder.git
    ```
 2. Open [`index.html`](index.html) directly in your web browser (Chrome, Edge, Firefox, Safari).
 

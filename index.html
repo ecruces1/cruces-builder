@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive Resume Editor | PDF & Illustrator</title>
+  <link rel="stylesheet" href="styles.css">
+  <!-- PDF.js library for direct PDF uploading & client-side parsing -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    }
+  </script>
+</head>
+<body>
+
+  <!-- Top Application Header Bar -->
+  <header class="app-header">
+    <div class="brand-logo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="16" y1="13" x2="8" y2="13"/>
+        <line x1="16" y1="17" x2="8" y2="17"/>
+        <line x1="10" y1="9" x2="8" y2="9"/>
+      </svg>
+      Resume Builder
+      <span class="brand-badge">PDF & Illustrator</span>
+    </div>
+
+    <!-- Resume Profile / Variant Switcher -->
+    <div class="profile-toolbar-group">
+      <span class="profile-toolbar-label">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        Variant:
+      </span>
+      <select id="select-resume-profile" class="form-control profile-select-dropdown" title="Switch between different resume variants/profiles">
+      </select>
+      <button class="btn btn-sm btn-outline profile-action-btn" id="btn-new-profile" title="Create a new blank resume variant">+ New</button>
+      <button class="btn btn-sm btn-outline profile-action-btn" id="btn-duplicate-profile" title="Duplicate current resume as a new variant">Duplicate</button>
+      <button class="btn btn-sm btn-outline profile-action-btn" id="btn-manage-profiles" title="Rename or manage profiles">⚙️</button>
+    </div>
+
+    <div class="header-actions">
+      <!-- Undo / Redo Buttons -->
+      <button class="btn btn-secondary" id="btn-undo" title="Undo last change (Ctrl+Z)" disabled style="opacity: 0.45; cursor: not-allowed;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
+        Undo
+      </button>
+
+      <button class="btn btn-secondary" id="btn-redo" title="Redo last undone change (Ctrl+Y or Ctrl+Shift+Z)" disabled style="opacity: 0.45; cursor: not-allowed;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"/></svg>
+        Redo
+      </button>
+
+      <!-- Upload / Re-upload PDF or AI File -->
+      <button class="btn btn-primary" id="btn-upload-doc" style="background: linear-gradient(135deg, #0b7a75, #1c3a5e);" title="Upload/Re-upload a PDF or Illustrator file">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Upload PDF / AI
+      </button>
+      <input type="file" id="file-import-doc" accept=".pdf,.ai,.json" style="display: none;">
+
+      <button class="btn btn-outline" id="btn-reset-template" title="Reset to original template">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        Reset
+      </button>
+
+      <button class="btn btn-secondary" id="btn-save-state" title="Save Resume snapshot (Ctrl+S)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+        Save <span style="font-size: 0.68rem; opacity: 0.75; margin-left: 2px;">(Ctrl+S)</span>
+      </button>
+
+      <button class="btn btn-secondary" id="btn-version-history" title="View last 10 versions & restore points">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+        History <span id="version-count-badge" style="background: #0b7a75; color: white; border-radius: 10px; padding: 1px 6px; font-size: 0.68rem; font-weight: 700; margin-left: 3px;">1</span>
+      </button>
+
+      <button class="btn btn-secondary" id="btn-export-json">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        Save JSON
+      </button>
+
+      <button class="btn btn-secondary" id="btn-ats-text">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
+        ATS Text
+      </button>
+
+      <button class="btn btn-primary" id="btn-export-pdf">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+        Export PDF
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Workspace split view -->
+  <div class="app-container">
+
+    <!-- Left Sidebar Form Editor -->
+    <aside class="sidebar">
+      <nav class="sidebar-tabs">
+        <button class="tab-btn active" data-tab="header">Header</button>
+        <button class="tab-btn" data-tab="summary">Summary</button>
+        <button class="tab-btn" data-tab="skills">Skills</button>
+        <button class="tab-btn" data-tab="experience">Experience</button>
+        <button class="tab-btn" data-tab="education">Education</button>
+        <button class="tab-btn" data-tab="more">More</button>
+      </nav>
+
+      <div class="sidebar-content">
+
+        <!-- Tab 1: Header & Contact -->
+        <div class="tab-panel active" id="panel-header">
+          <div class="form-section">
+            <div class="form-section-title">Personal Details</div>
+            <div class="form-group">
+              <label>Full Name</label>
+              <input type="text" id="input-fullName" class="form-control" placeholder="YOUR FULL NAME">
+            </div>
+            <div class="form-group">
+              <label>Professional Title / Role</label>
+              <input type="text" id="input-proTitle" class="form-control" placeholder="PROFESSIONAL TITLE / ROLE">
+            </div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-title">Contact Bar</div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label>Phone Number</label>
+                <input type="text" id="input-phone" class="form-control">
+              </div>
+              <div class="form-group">
+                <label>Email Address</label>
+                <input type="text" id="input-email" class="form-control">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Location / Address</label>
+              <input type="text" id="input-address" class="form-control">
+            </div>
+            <div class="grid-2">
+              <div class="form-group">
+                <label>LinkedIn Link</label>
+                <input type="text" id="input-linkedin" class="form-control">
+              </div>
+              <div class="form-group">
+                <label>Website / Portfolio</label>
+                <input type="text" id="input-website" class="form-control">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Professional Summary -->
+        <div class="tab-panel" id="panel-summary">
+          <div class="form-section">
+            <div class="form-section-title">
+              Professional Summary
+              <button class="btn btn-sm btn-outline" style="color: #ef4444;" onclick="deleteSection('summary')">✕ Delete Section</button>
+            </div>
+            <div class="form-group">
+              <label>Summary Statement</label>
+              <textarea id="input-summary" class="form-control" style="min-height: 140px;"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Core Skills Grid -->
+        <div class="tab-panel" id="panel-skills">
+          <div class="form-section">
+            <div class="form-section-title">
+              Core Skills (3 Column Grid)
+              <button class="btn btn-sm btn-outline" style="color: #ef4444;" onclick="deleteSection('skills')">✕ Delete Section</button>
+            </div>
+            <div id="skills-form-container"></div>
+          </div>
+        </div>
+
+        <!-- Tab 4: Experience -->
+        <div class="tab-panel" id="panel-experience">
+          <div class="form-section">
+            <div class="form-section-title">
+              Professional Experience
+              <div>
+                <button class="btn btn-sm btn-primary" onclick="addExp()">+ Add Job</button>
+                <button class="btn btn-sm btn-outline" style="color: #ef4444;" onclick="deleteSection('experience')">✕ Delete</button>
+              </div>
+            </div>
+            <div id="exp-form-container"></div>
+          </div>
+        </div>
+
+        <!-- Tab 5: Education -->
+        <div class="tab-panel" id="panel-education">
+          <div class="form-section">
+            <div class="form-section-title">
+              Education
+              <div>
+                <button class="btn btn-sm btn-primary" onclick="addEdu()">+ Add Degree</button>
+                <button class="btn btn-sm btn-outline" style="color: #ef4444;" onclick="deleteSection('education')">✕ Delete</button>
+              </div>
+            </div>
+            <div id="edu-form-container"></div>
+          </div>
+        </div>
+
+        <!-- Tab 6: Certifications & Achievements -->
+        <div class="tab-panel" id="panel-more">
+          <div class="form-section">
+            <div class="form-section-title">
+              Certifications
+              <div>
+                <button class="btn btn-sm btn-primary" onclick="addCert()">+ Add</button>
+                <button class="btn btn-sm btn-outline" style="color: #ef4444;" onclick="deleteSection('certifications')">✕ Delete</button>
+              </div>
+            </div>
+            <div id="cert-form-container"></div>
+          </div>
+
+          <div class="form-section">
+            <div class="form-section-title">
+              Languages & Achievements
+              <div>
+                <button class="btn btn-sm btn-primary" onclick="addAch()">+ Add</button>
+                <button class="btn btn-sm btn-outline" style="color: #ef4444;" onclick="deleteSection('achievements')">✕ Delete</button>
+              </div>
+            </div>
+            <div id="ach-form-container"></div>
+          </div>
+
+          <div id="add-sections-container" style="margin-top: 20px;"></div>
+        </div>
+
+      </div>
+    </aside>
+
+    <!-- Right Live Resume Canvas -->
+    <main class="canvas-wrapper">
+
+      <!-- Floating Toolbar -->
+      <div class="canvas-toolbar">
+        <span class="page-count-badge" id="page-count-badge">📄 1 Page (8.5 x 11 in)</span>
+
+        <div style="height: 18px; width: 1px; background: #cbd5e1;"></div>
+
+        <div class="toolbar-group">
+          <span class="toolbar-label">Theme:</span>
+          <div class="color-swatch-list" id="color-swatch-list">
+            <div class="color-swatch active" data-theme="illustrator" style="background: linear-gradient(135deg, #1C3A5E 50%, #0B7A75 50%);" title="Illustrator Navy & Teal"></div>
+            <div class="color-swatch" data-theme="monochrome" style="background: linear-gradient(135deg, #000000 50%, #444444 50%);" title="Printer Friendly Black & White"></div>
+            <div class="color-swatch" data-theme="charcoal" style="background: linear-gradient(135deg, #1E293B 50%, #3B82F6 50%);" title="Executive Charcoal & Blue"></div>
+            <div class="color-swatch" data-theme="emerald" style="background: linear-gradient(135deg, #0F5132 50%, #198754 50%);" title="Tech Emerald"></div>
+            <div class="color-swatch" data-theme="burgundy" style="background: linear-gradient(135deg, #581845 50%, #900C3F 50%);" title="Classic Burgundy"></div>
+            <div class="color-swatch" data-theme="indigo" style="background: linear-gradient(135deg, #311B92 50%, #6200EA 50%);" title="Modern Indigo"></div>
+          </div>
+        </div>
+
+        <div style="height: 18px; width: 1px; background: #cbd5e1;"></div>
+
+        <div class="toolbar-group">
+          <span class="toolbar-label">Font:</span>
+          <select id="select-font" class="form-control" style="width: 110px; padding: 4px 8px; font-size: 0.8rem;">
+            <option value="Poppins">Poppins</option>
+            <option value="Inter">Inter</option>
+            <option value="Roboto">Roboto</option>
+            <option value="Montserrat">Montserrat</option>
+            <option value="Open Sans">Open Sans</option>
+          </select>
+        </div>
+
+        <div style="height: 18px; width: 1px; background: #cbd5e1;"></div>
+
+        <div class="toolbar-group">
+          <span class="toolbar-label" style="display: flex; align-items: center; gap: 4px;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+            Revisions:
+          </span>
+          <select id="select-version-dropdown" class="form-control" style="width: 210px; padding: 4px 8px; font-size: 0.8rem; text-overflow: ellipsis;" title="Select any previous revision to restore your document">
+            <option value="current">Current Version</option>
+          </select>
+          <button class="btn btn-sm btn-outline" id="btn-peek-history" title="Open Split Preview & Revision Manager" style="padding: 3px 8px; font-size: 0.75rem; display: flex; align-items: center; gap: 4px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            Peek & History
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Editable Multi-Page Physical Sheets Container -->
+      <div id="resume-pages-container" class="pages-container">
+        <!-- Rendered dynamically by app.js as Page 1, Page 2, etc. -->
+      </div>
+
+    </main>
+
+  </div>
+
+  <!-- Modal for ATS Text -->
+  <div class="modal-overlay" id="modal-ats">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span>ATS Plain Text View</span>
+        <button class="btn btn-sm btn-outline" onclick="closeModal('modal-ats')">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 12px;">
+          This plain text version is formatted for easy copy-pasting directly into online application tracking systems (ATS).
+        </p>
+        <pre class="ats-code-block" id="ats-text-output"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-ats')">Close</button>
+        <button class="btn btn-primary" onclick="copyATSText()">Copy Plain Text</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Version History & Non-Destructive Split Preview -->
+  <div class="modal-overlay" id="modal-history">
+    <div class="modal-card modal-card-wide">
+      <div class="modal-header" style="padding: 14px 20px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+          <div>
+            <div style="font-weight: 700; font-size: 1.05rem; color: #1e293b;">Revision History & Variants</div>
+            <div style="font-size: 0.76rem; color: #64748b; font-weight: normal;">Inspect past snapshots, preview contents safely, star key milestones, or branch into new resumes.</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button class="btn btn-sm btn-primary" onclick="promptSaveManualState()" style="font-size: 0.78rem;">+ Save Named Snapshot (Ctrl+S)</button>
+          <button class="btn btn-sm btn-outline" onclick="closeModal('modal-history')">✕</button>
+        </div>
+      </div>
+
+      <!-- History Filter & Search Bar -->
+      <div class="history-filter-bar">
+        <div class="history-search-wrap">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="history-search-input" placeholder="Search by role, company, name, or note..." class="form-control history-search-input">
+        </div>
+        <div class="history-tabs">
+          <button class="history-tab active" data-filter="all" id="tab-filter-all">All (<span id="count-all">0</span>)</button>
+          <button class="history-tab" data-filter="starred" id="tab-filter-starred">⭐ Starred (<span id="count-starred">0</span>)</button>
+          <button class="history-tab" data-filter="manual" id="tab-filter-manual">💾 Named / Manual (<span id="count-manual">0</span>)</button>
+          <button class="history-tab" data-filter="auto" id="tab-filter-auto">⏱ Auto-Saves (<span id="count-auto">0</span>)</button>
+        </div>
+      </div>
+
+      <!-- Split Layout Body -->
+      <div class="history-split-body">
+        <!-- Left: Revision List -->
+        <div class="history-list-pane">
+          <div id="version-history-list" class="version-list-rich"></div>
+        </div>
+
+        <!-- Right: Inspection / Peek Panel -->
+        <div class="history-inspect-pane" id="history-inspect-pane">
+          <div id="history-preview-content" class="history-preview-content">
+            <!-- Rendered dynamically by app.js -->
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="padding: 10px 20px; font-size: 0.78rem; color: #64748b; justify-content: space-between; align-items: center;">
+        <span>💡 Tip: Click any card to preview its full contents on the right without changing your editor.</span>
+        <button class="btn btn-secondary" onclick="closeModal('modal-history')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Profile Settings & Management -->
+  <div class="modal-overlay" id="modal-profile-manage">
+    <div class="modal-card" style="max-width: 520px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span style="font-weight: 700;">Manage Resume Profiles / Variants</span>
+        </div>
+        <button class="btn btn-sm btn-outline" onclick="closeModal('modal-profile-manage')">✕</button>
+      </div>
+      <div class="modal-body" style="max-height: 400px; overflow-y: auto;">
+        <p style="font-size: 0.82rem; color: #64748b; margin-bottom: 14px; line-height: 1.4;">
+          Profiles let you tailor completely different resumes (e.g. <em>Product Design</em>, <em>Customer Support</em>, <em>Web Dev</em>) without cluttering or overwriting your edit history.
+        </p>
+        <div id="profiles-manager-list" class="profiles-list-container"></div>
+      </div>
+      <div class="modal-footer" style="justify-content: space-between;">
+        <button class="btn btn-secondary" onclick="closeModal('modal-profile-manage')">Close</button>
+        <button class="btn btn-primary" onclick="openNewVariantModal()">+ Create New Profile</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal for Creating a New Resume Variant -->
+  <div class="modal-overlay" id="modal-new-variant">
+    <div class="modal-card" style="max-width: 540px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div class="modal-icon-badge">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+          </div>
+          <div>
+            <div style="font-weight: 700; font-size: 1.05rem; color: #1e293b;">Create Resume Variant</div>
+            <div style="font-size: 0.76rem; color: #64748b; font-weight: normal;">Tailor a specialized version of your resume for a target role or company.</div>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-outline" onclick="closeModal('modal-new-variant')">✕</button>
+      </div>
+      <div class="modal-body" style="display: flex; flex-direction: column; gap: 18px;">
+        <div>
+          <label style="font-weight: 600; font-size: 0.84rem; color: #1e293b; display: block; margin-bottom: 6px;">
+            Variant Name <span style="color: #ef4444;">*</span>
+          </label>
+          <input type="text" id="input-new-variant-name" class="form-control" placeholder="e.g. 'Tech Support Specialist', 'Senior Designer'" style="font-size: 0.92rem; padding: 10px 14px; width: 100%;">
+          <span id="new-variant-error" style="font-size: 0.75rem; color: #ef4444; margin-top: 4px; display: none;">Please provide a name for this variant.</span>
+        </div>
+
+        <div>
+          <label style="font-weight: 600; font-size: 0.84rem; color: #1e293b; display: block; margin-bottom: 8px;">
+            Starting Content
+          </label>
+          <div class="variant-source-options">
+            <label class="variant-source-card selected" id="source-card-copy">
+              <input type="radio" name="variant-source" value="copy" checked style="display: none;">
+              <div class="variant-source-radio-circle"></div>
+              <div class="variant-source-info">
+                <div class="variant-source-title">
+                  <span>Copy Current Resume</span>
+                  <span class="variant-source-badge">Recommended</span>
+                </div>
+                <div class="variant-source-desc">Duplicate your active resume data so you can quickly tailor your experience, skills, and summary for this role.</div>
+              </div>
+            </label>
+
+            <label class="variant-source-card" id="source-card-blank">
+              <input type="radio" name="variant-source" value="blank" style="display: none;">
+              <div class="variant-source-radio-circle"></div>
+              <div class="variant-source-info">
+                <div class="variant-source-title">Start with Fresh Template</div>
+                <div class="variant-source-desc">Start clean with standard Adobe Illustrator layout and sample placeholder entries.</div>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: flex-end; gap: 10px;">
+        <button class="btn btn-secondary" onclick="closeModal('modal-new-variant')">Cancel</button>
+        <button class="btn btn-primary" id="btn-submit-new-variant" style="padding: 8px 18px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Create Variant
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reusable Modal Dialog for Custom In-App Prompts and Confirmations -->
+  <div class="modal-overlay" id="modal-app-dialog">
+    <div class="modal-card" style="max-width: 490px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <div class="modal-icon-badge" id="dialog-icon-badge">
+            <svg id="dialog-svg-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </div>
+          <div>
+            <div id="dialog-title" style="font-weight: 700; font-size: 1.02rem; color: #1e293b;">Confirm</div>
+            <div id="dialog-subtitle" style="font-size: 0.74rem; color: #64748b; font-weight: normal; display: none;"></div>
+          </div>
+        </div>
+        <button class="btn btn-sm btn-outline" id="dialog-btn-close">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 20px;">
+        <div id="dialog-message" style="font-size: 0.88rem; color: #334155; line-height: 1.5; white-space: pre-line;"></div>
+        <div id="dialog-input-wrap" style="display: none; margin-top: 14px;">
+          <input type="text" id="dialog-input" class="form-control" style="font-size: 0.92rem; padding: 10px 12px; width: 100%;">
+          <span id="dialog-input-hint" style="font-size: 0.75rem; color: #64748b; margin-top: 4px; display: block;"></span>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: flex-end; gap: 10px;">
+        <button class="btn btn-secondary" id="dialog-btn-cancel">Cancel</button>
+        <button class="btn btn-primary" id="dialog-btn-confirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="template_data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
