@@ -9,8 +9,28 @@ desktop.ini
 *.sublime-project
 *.sublime-workspace
 
-# Optional: Large test artifacts (uncomment if you do not want to track test exports)
+# Environment & Secrets
+.env
+.env.*
+*.env
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Proprietary & Large Binary Design Assets
+*.ai
+templates/*.ai
+
+# Scripts & Local Tools
+push_to_github.bat
+
+# Optional: Large test artifacts
 # *.pdf
 
-push_to_github.bat
 
