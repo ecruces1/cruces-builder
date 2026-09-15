@@ -30,9 +30,11 @@ templates/*.ai
 # Scripts & Local Tools
 push_to_github.bat
 
-# Test & Development Media / Samples
+# Test & Development Media / Local Dev Only (Never uploaded to GitHub)
 reference-images/
+reference-images/**
 samples/
+samples/**
 *.pdf
 
 
