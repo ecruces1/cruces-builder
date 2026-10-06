@@ -381,9 +381,15 @@ async function deleteProfile(id) {
     if (currentProfileId === id) {
       currentProfileId = resumeProfiles[0].id;
       state = JSON.parse(JSON.stringify(resumeProfiles[0].data));
+      localStorage.setItem("antigravity_resume_data", JSON.stringify(state));
+      undoStack.length = 0;
+      redoStack.length = 0;
+      lastRecordedStateJSON = JSON.stringify(state);
+      updateUndoRedoButtons();
       populateFormFields();
       applySettings();
       renderCanvas();
+      updateVersionDropdown();
     }
     saveProfilesToStorage();
     updateProfileDropdown();
@@ -3077,6 +3083,21 @@ function parseResumeText(fullText, fileName = "") {
 // Global holding area for pending document import
 let pendingDocImport = null;
 
+// Entropy & Alphanumeric Scramble Detector for Unmapped/CID PDF Fonts
+function detectTextScrambling(rawText) {
+  if (!rawText || typeof rawText !== 'string' || rawText.trim().length === 0) {
+    return { isScrambled: false, ratio: 0, reason: "empty" };
+  }
+  const clean = rawText.replace(/\s+/g, '');
+  if (clean.length < 30) {
+    return { isScrambled: false, ratio: 1, reason: "short" };
+  }
+  const alphanumericCount = (clean.match(/[a-zA-Z0-9]/g) || []).length;
+  const ratio = alphanumericCount / clean.length;
+  // Normal English resumes are > 70% alphanumeric. Scrambled/unmapped CID fonts are < 40%.
+  return { isScrambled: ratio < 0.45, ratio, alphanumericCount, totalCount: clean.length };
+}
+
 // Universal PDF, AI, and JSON Document Uploader & Parser
 async function handleDocUpload(e) {
   const file = e.target.files[0];
@@ -3141,6 +3162,10 @@ async function handleDocUpload(e) {
         docThemes = generateDocThemes("#1C3A5E", "#0B7A75", file.name);
       }
 
+      // Detect unmapped font encodings (Fix 2: Scrambled Stream Detection)
+      const scrambleInfo = detectTextScrambling(fullText);
+      const isScrambled = scrambleInfo.isScrambled && fullText.trim().length > 50;
+
       // Parse text into structured resume fields
       const parsedResume = parseResumeText(fullText, file.name);
 
@@ -3151,7 +3176,8 @@ async function handleDocUpload(e) {
         fullText: fullText,
         parsedResume: parsedResume,
         docThemes: docThemes,
-        detectedFont: detectedFont
+        detectedFont: detectedFont,
+        isScrambled: isScrambled
       };
 
       openUploadOptionsModal(pendingDocImport);
@@ -3165,7 +3191,8 @@ async function handleDocUpload(e) {
         fullText: "",
         parsedResume: parseResumeText("", file.name),
         docThemes: docThemes,
-        detectedFont: null
+        detectedFont: null,
+        isScrambled: false
       };
       openUploadOptionsModal(pendingDocImport);
     }
@@ -3194,10 +3221,17 @@ function openUploadOptionsModal(importData) {
     }
   }
 
+  const warningEl = document.getElementById("upload-summary-warning");
+  if (warningEl) {
+    warningEl.style.display = importData.isScrambled ? "block" : "none";
+  }
+
   if (personEl) {
     const name = importData.parsedResume?.header?.fullName;
     const role = importData.parsedResume?.header?.professionalTitle;
-    if (name && role) {
+    if (importData.isScrambled) {
+      personEl.innerHTML = `<span style="color: #e11d48; font-weight: 600;">⚠️ Custom outline/vector fonts detected (non-standard text encoding)</span>`;
+    } else if (name && role) {
       personEl.textContent = `Parsed: ${name} • ${role}`;
     } else if (name) {
       personEl.textContent = `Parsed: ${name}`;
@@ -3226,12 +3260,22 @@ function openUploadOptionsModal(importData) {
   const cardCurrent = document.getElementById("upload-card-current");
   const cardThemeOnly = document.getElementById("upload-card-theme-only");
   const radioNew = cardNew?.querySelector("input");
+  const radioThemeOnly = cardThemeOnly?.querySelector("input");
 
-  if (radioNew) radioNew.checked = true;
-  cardNew?.classList.add("selected");
-  cardCurrent?.classList.remove("selected");
-  cardThemeOnly?.classList.remove("selected");
-  document.getElementById("upload-variant-name-wrap")?.style.setProperty("display", "block");
+  if (importData.isScrambled) {
+    // If text stream is scrambled due to unmapped fonts, default safely to theme-only extraction
+    if (radioThemeOnly) radioThemeOnly.checked = true;
+    cardThemeOnly?.classList.add("selected");
+    cardNew?.classList.remove("selected");
+    cardCurrent?.classList.remove("selected");
+    document.getElementById("upload-variant-name-wrap")?.style.setProperty("display", "none");
+  } else {
+    if (radioNew) radioNew.checked = true;
+    cardNew?.classList.add("selected");
+    cardCurrent?.classList.remove("selected");
+    cardThemeOnly?.classList.remove("selected");
+    document.getElementById("upload-variant-name-wrap")?.style.setProperty("display", "block");
+  }
 
   modal.classList.add("active");
 }
@@ -3240,6 +3284,25 @@ function parseAndLoadDocumentText(text, filename, extractedDocThemes = null, ext
   const savedDocThemes = extractedDocThemes || state.docThemes || {};
   const parsed = parseResumeText(text, filename);
   
+  // FIX 1: Zero-Yield Safeguard
+  const extractedYield = (parsed.header.fullName ? 1 : 0) +
+    (parsed.summary ? 1 : 0) +
+    parsed.skills.reduce((acc, c) => acc + (c.items ? c.items.length : 0), 0) +
+    parsed.experience.length +
+    parsed.education.length;
+
+  if (extractedYield === 0) {
+    showToast("⚠️ Could not extract text from this document. Existing resume preserved!");
+    if (savedDocThemes && savedDocThemes.doc_original) {
+      state.docThemes = savedDocThemes;
+      state.settings.theme = "doc_original";
+      applySettings();
+      renderCanvas();
+      saveState(true);
+    }
+    return;
+  }
+
   state = JSON.parse(JSON.stringify(parsed));
   state.entryHeights = {};
   state.sectionPaddings = {};
@@ -3580,14 +3643,20 @@ function openATSModal() {
   modal.classList.add("active");
 }
 
+let currentDialogResolve = null;
+let currentDialogDefaultVal = false;
+
 window.closeModal = function(id) {
   const modal = document.getElementById(id);
   if (!modal) return;
   modal.classList.remove("active");
 
   if (id === "modal-app-dialog" && currentDialogResolve) {
-    currentDialogResolve(false);
+    const fn = currentDialogResolve;
+    const val = currentDialogDefaultVal;
     currentDialogResolve = null;
+    currentDialogDefaultVal = false;
+    fn(val);
   }
 };
 
@@ -3601,7 +3670,6 @@ window.copyATSText = function() {
 // ==========================================
 // CUSTOM APP DIALOGS (Confirm & Prompt)
 // ==========================================
-let currentDialogResolve = null;
 
 window.appConfirm = function({
   title = "Confirm Action",
@@ -3613,6 +3681,7 @@ window.appConfirm = function({
 } = {}) {
   return new Promise((resolve) => {
     currentDialogResolve = resolve;
+    currentDialogDefaultVal = false;
 
     const modal = document.getElementById("modal-app-dialog");
     const titleEl = document.getElementById("dialog-title");
@@ -3660,15 +3729,15 @@ window.appConfirm = function({
 
     if (btnConfirm) {
       btnConfirm.onclick = () => {
-        closeModal("modal-app-dialog");
         cleanup();
+        closeModal("modal-app-dialog");
         resolve(true);
       };
     }
 
     const cancelHandler = () => {
-      closeModal("modal-app-dialog");
       cleanup();
+      closeModal("modal-app-dialog");
       resolve(false);
     };
 
@@ -3691,6 +3760,7 @@ window.appPrompt = function({
 } = {}) {
   return new Promise((resolve) => {
     currentDialogResolve = resolve;
+    currentDialogDefaultVal = null;
 
     const modal = document.getElementById("modal-app-dialog");
     const titleEl = document.getElementById("dialog-title");
@@ -3739,14 +3809,14 @@ window.appPrompt = function({
 
     const doSubmit = () => {
       const val = inputEl.value.trim();
-      closeModal("modal-app-dialog");
       cleanup();
+      closeModal("modal-app-dialog");
       resolve(val);
     };
 
     const doCancel = () => {
-      closeModal("modal-app-dialog");
       cleanup();
+      closeModal("modal-app-dialog");
       resolve(null);
     };
 
@@ -3834,8 +3904,11 @@ function initVariantModalEvents() {
   // Global dismiss handlers: Escape key and clicking modal backdrop
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      const activeModals = document.querySelectorAll(".modal-overlay.active");
-      activeModals.forEach(modal => closeModal(modal.id));
+      const activeModals = Array.from(document.querySelectorAll(".modal-overlay.active"));
+      if (activeModals.length > 0) {
+        const topModal = activeModals[activeModals.length - 1];
+        closeModal(topModal.id);
+      }
     }
   });
 
@@ -3896,7 +3969,7 @@ function executeDocumentImport() {
     return;
   }
 
-  const { parsedResume, docThemes, detectedFont, fileName } = pendingDocImport;
+  const { parsedResume, docThemes, detectedFont, fileName, isScrambled } = pendingDocImport;
   const radioNew = document.getElementById("upload-card-new-variant")?.querySelector("input");
   const radioCurrent = document.getElementById("upload-card-current")?.querySelector("input");
   const radioThemeOnly = document.getElementById("upload-card-theme-only")?.querySelector("input");
@@ -3905,6 +3978,23 @@ function executeDocumentImport() {
   const isNewVariant = radioNew ? radioNew.checked : true;
   const isCurrent = radioCurrent ? radioCurrent.checked : false;
   const isThemeOnly = radioThemeOnly ? radioThemeOnly.checked : false;
+
+  // FIX 1: Zero-Yield Safeguard
+  const extractedYield = (parsedResume.header.fullName ? 1 : 0) +
+    (parsedResume.summary ? 1 : 0) +
+    parsedResume.skills.reduce((acc, c) => acc + (c.items ? c.items.length : 0), 0) +
+    parsedResume.experience.length +
+    parsedResume.education.length;
+
+  if (!isThemeOnly && extractedYield === 0) {
+    if (isScrambled) {
+      showToast("⚠️ Unmapped outline fonts: text could not be extracted. Existing resume preserved!");
+    } else {
+      showToast("⚠️ No resume content could be extracted from this document. Existing resume preserved!");
+    }
+    closeModal("modal-upload-options");
+    return;
+  }
 
   flushTypingTransaction();
 

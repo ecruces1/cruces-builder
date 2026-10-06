@@ -1504,6 +1504,10 @@ textarea.form-control {
   pointer-events: auto;
 }
 
+#modal-app-dialog {
+  z-index: 1100;
+}
+
 .modal-card {
   background: white;
   width: 600px;
